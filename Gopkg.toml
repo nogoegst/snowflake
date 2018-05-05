@@ -1,0 +1,38 @@
+[[constraint]]
+  name = "git.torproject.org/pluggable-transports/goptlib.git"
+  version = "0.7.0"
+
+[[constraint]]
+  name = "git.torproject.org/pluggable-transports/websocket.git"
+  branch = "master"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/dchest/uniuri"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/keroserene/go-webrtc"
+
+[[constraint]]
+  name = "github.com/smartystreets/goconvey"
+  version = "1.6.3"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/crypto"
+
+[[constraint]]
+  branch = "master"
+  name = "golang.org/x/net"
+
+[[constraint]]
+  name = "google.golang.org/appengine"
+  version = "1.0.0"
+
+[prune]
+  go-tests = true
+  unused-packages = true
+  [[prune.project]]
+    name = "github.com/keroserene/go-webrtc"
+    unused-packages = false

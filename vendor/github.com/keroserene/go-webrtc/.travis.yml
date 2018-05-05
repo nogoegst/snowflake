@@ -1,0 +1,28 @@
+language: go
+
+addons:
+    apt:
+        sources:
+            - ubuntu-toolchain-r-test
+        packages:
+            - g++-5
+            - gcc-5
+
+matrix:
+    include:
+        - os: linux
+          dist: trusty
+          sudo: required
+          go: 1.6
+          env: CC="gcc-5" CXX="g++-5" OS="linux"
+        - os: osx
+
+install:
+    - go get -u github.com/smartystreets/goconvey
+
+script:
+    - test -z "$(go fmt .)"
+    - go vet .
+    - go test -v -race .
+    # Only linux until https://github.com/golang/go/issues/16150 is fixed.
+    - if [[ "$OS" == "linux" ]]; then CGO_CFLAGS="-fsanitize=address" CGO_LDFLAGS="-fsanitize=address -fuse-ld=gold" go test -v .; fi

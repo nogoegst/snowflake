@@ -1,0 +1,26 @@
+*.swp
+*.swo
+*.swn
+*.swm
+*.test
+.DS_Store
+
+/third_party/
+/demo/demo
+/demo/chat/chat
+
+# When updating .h, make sure not to include unnecessary directories.
+/include/build/
+/include/buildtools/
+/include/common_audio/
+/include/examples/
+/include/out/
+/include/sdk/
+/include/stats/
+/include/test/
+/include/testing/
+/include/third_party/
+/include/tools/
+/include/tools_webrtc/
+/include/video/
+/include/voice_engine/
