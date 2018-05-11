@@ -14,7 +14,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -38,6 +40,7 @@ type BrokerChannel struct {
 	Host      string
 	url       *url.URL
 	transport http.RoundTripper // Used to make all requests.
+	codec     string
 }
 
 // We make a copy of DefaultTransport because we want the default Dial
@@ -52,7 +55,7 @@ func CreateBrokerTransport() http.RoundTripper {
 // Construct a new BrokerChannel, where:
 // |broker| is the full URL of the facilitating program which assigns proxies
 // to clients, and |front| is the option fronting domain.
-func NewBrokerChannel(broker string, front string, transport http.RoundTripper) *BrokerChannel {
+func NewBrokerChannel(broker, front, codec string, transport http.RoundTripper) *BrokerChannel {
 	targetURL, err := url.Parse(broker)
 	if nil != err {
 		return nil
@@ -65,12 +68,67 @@ func NewBrokerChannel(broker string, front string, transport http.RoundTripper) 
 		bc.Host = bc.url.Host
 		bc.url.Host = front
 	}
-
+	bc.codec = codec
 	bc.transport = transport
 	return bc
 }
 
-// Roundtrip HTTP POST using WebRTC SessionDescriptions.
+type Error struct {
+	E string `json:"error"`
+}
+
+func (e Error) Error() string {
+	return e.E
+}
+
+func DecodeError(p []byte) (error, error) {
+	e := Error{}
+	err := json.Unmarshal(p, &e)
+	if err != nil {
+		return nil, err
+	}
+	if e.E == "" {
+		return nil, nil
+	}
+	return e, nil
+}
+
+func (bc *BrokerChannel) RoundTrip(r io.Reader) (io.ReadCloser, error) {
+	switch bc.codec {
+	case "post":
+		return bc.RoundTripPOST(r)
+	}
+	return nil, errors.New("unsupported codec")
+}
+
+// Roundtrip using HTTP POST codec
+func (bc *BrokerChannel) RoundTripPOST(r io.Reader) (io.ReadCloser, error) {
+	// Suffix with broker's client registration handler.
+	clientURL := bc.url.ResolveReference(&url.URL{Path: "client"})
+	request, err := http.NewRequest(http.MethodPost, clientURL.String(), r)
+	if err != nil {
+		return nil, err
+	}
+	if bc.Host != "" { // Set true host if necessary.
+		request.Host = bc.Host
+	}
+	response, err := bc.transport.RoundTrip(request)
+	if err != nil {
+		return nil, err
+	}
+	switch response.StatusCode {
+	case http.StatusOK:
+		return response.Body, nil
+	case http.StatusServiceUnavailable:
+		return nil, errors.New(BrokerError503)
+	case http.StatusBadRequest:
+		return nil, errors.New(BrokerError400)
+	default:
+		return nil, errors.New(BrokerErrorUnexpected)
+	}
+}
+
+// Roundtrip using WebRTC SessionDescriptions.
 //
 // Send an SDP offer to the broker, which assigns a proxy and responds
 // with an SDP answer from a designated remote WebRTC peer.
@@ -79,38 +137,29 @@ func (bc *BrokerChannel) Negotiate(offer *webrtc.SessionDescription) (
 	log.Println("Negotiating via BrokerChannel...\nTarget URL: ",
 		bc.Host, "\nFront URL:  ", bc.url.Host)
 	data := bytes.NewReader([]byte(offer.Serialize()))
-	// Suffix with broker's client registration handler.
-	clientURL := bc.url.ResolveReference(&url.URL{Path: "client"})
-	request, err := http.NewRequest("POST", clientURL.String(), data)
+	resp, err := bc.RoundTrip(data)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Close()
+
+	body, err := ioutil.ReadAll(resp)
 	if nil != err {
 		return nil, err
 	}
-	if "" != bc.Host { // Set true host if necessary.
-		request.Host = bc.Host
-	}
-	resp, err := bc.transport.RoundTrip(request)
-	if nil != err {
+
+	e, err := DecodeError(body)
+	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	log.Printf("BrokerChannel Response:\n%s\n\n", resp.Status)
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		body, err := ioutil.ReadAll(resp.Body)
-		if nil != err {
-			return nil, err
-		}
-		answer := webrtc.DeserializeSessionDescription(string(body))
-		return answer, nil
-
-	case http.StatusServiceUnavailable:
-		return nil, errors.New(BrokerError503)
-	case http.StatusBadRequest:
-		return nil, errors.New(BrokerError400)
-	default:
-		return nil, errors.New(BrokerErrorUnexpected)
+	if e != nil {
+		return nil, e
 	}
+
+	log.Printf("BrokerChannel Response:\n%s\n\n", body)
+	answer := webrtc.DeserializeSessionDescription(string(body))
+	return answer, nil
+
 }
 
 // Implements the |Tongue| interface to catch snowflakes, using BrokerChannel.

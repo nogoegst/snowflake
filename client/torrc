@@ -4,6 +4,7 @@ DataDirectory datadir
 ClientTransportPlugin snowflake exec ./client \
 -url https://snowflake-broker.azureedge.net/ \
 -front ajax.aspnetcdn.com \
+-codec=post \
 -ice stun:stun.l.google.com:19302 \
 -max 3
 

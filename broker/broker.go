@@ -6,10 +6,14 @@ SessionDescriptions in order to negotiate a WebRTC connection.
 package main
 
 import (
+	"bytes"
 	"container/heap"
 	"crypto/tls"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -143,24 +147,53 @@ func proxyPolls(ctx *BrokerContext, w http.ResponseWriter, r *http.Request) {
 	w.Write(offer)
 }
 
+var (
+	ErrNoSnowflakes  = errors.New("No snowflakes proxies available")
+	ErrAnswerTimeout = errors.New("Timeout waiting for answer")
+)
+
+type Error struct {
+	E string `json:"error"`
+}
+
+func (e Error) Error() string {
+	return e.E
+}
+
+// Write JSON-encoded error message.
+func WriteError(w io.Writer, err error) error {
+	return json.NewEncoder(w).Encode(&Error{E: err.Error()})
+}
+
+// Decode eror from JSON.
+func DecodeError(p []byte) (error, error) {
+	e := Error{}
+	err := json.Unmarshal(p, &e)
+	if err != nil {
+		return nil, err
+	}
+	if e.E == "" {
+		return nil, nil
+	}
+	return e, nil
+}
+
 /*
-Expects a WebRTC SDP offer in the Request to give to an assigned
-snowflake proxy, which responds with the SDP answer to be sent in
-the HTTP response back to the client.
+Expects a WebRTC SDP offer from request r to give to an assigned
+snowflake proxy, which responds with the SDP answer to be sent back to
+the client via w.
 */
-func clientOffers(ctx *BrokerContext, w http.ResponseWriter, r *http.Request) {
+func (ctx *BrokerContext) handleClientOffers(w io.Writer, r io.Reader) error {
 	startTime := time.Now()
-	offer, err := ioutil.ReadAll(r.Body)
-	if nil != err {
+	offer, err := ioutil.ReadAll(r)
+	if err != nil {
 		log.Println("Invalid data.")
-		w.WriteHeader(http.StatusBadRequest)
-		return
+		return err
 	}
 	// Immediately fail if there are no snowflakes available.
 	if ctx.snowflakes.Len() <= 0 {
 		log.Println("Client: No snowflake proxies available.")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		return
+		return WriteError(w, ErrNoSnowflakes)
 	}
 	// Otherwise, find the most available snowflake proxy, and pass the offer to it.
 	// Delete must be deferred in order to correctly process answer request later.
@@ -172,15 +205,34 @@ func clientOffers(ctx *BrokerContext, w http.ResponseWriter, r *http.Request) {
 	select {
 	case answer := <-snowflake.answerChannel:
 		log.Println("Client: Retrieving answer")
-		w.Write(answer)
+		_, err := w.Write(answer)
+		if err != nil {
+			return err
+		}
 		// Initial tracking of elapsed time.
 		ctx.metrics.clientRoundtripEstimate = time.Since(startTime) /
 			time.Millisecond
 	case <-time.After(time.Second * ClientTimeout):
 		log.Println("Client: Timed out.")
-		w.WriteHeader(http.StatusGatewayTimeout)
-		w.Write([]byte("timed out waiting for answer!"))
+		return WriteError(w, ErrAnswerTimeout)
 	}
+	return nil
+}
+
+func clientOffersPOST(ctx *BrokerContext, w http.ResponseWriter, r *http.Request) {
+	// Buffer to catch errors
+	var buf bytes.Buffer
+	ctx.handleClientOffers(&buf, r.Body)
+	// Write corresponding HTTP headers if there is an error
+	if err, _ := DecodeError(buf.Bytes()); err != nil {
+		switch err {
+		case ErrNoSnowflakes:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case ErrAnswerTimeout:
+			w.WriteHeader(http.StatusGatewayTimeout)
+		}
+	}
+	io.Copy(w, &buf)
 }
 
 /*
@@ -203,7 +255,6 @@ func proxyAnswers(ctx *BrokerContext, w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	log.Println("Received answer: ", body)
 	snowflake.answerChannel <- body
 }
 
@@ -242,7 +293,7 @@ func main() {
 	http.HandleFunc("/robots.txt", robotsTxtHandler)
 
 	http.Handle("/proxy", SnowflakeHandler{ctx, proxyPolls})
-	http.Handle("/client", SnowflakeHandler{ctx, clientOffers})
+	http.Handle("/client", SnowflakeHandler{ctx, clientOffersPOST})
 	http.Handle("/answer", SnowflakeHandler{ctx, proxyAnswers})
 	http.Handle("/debug", SnowflakeHandler{ctx, debugHandler})
 
