@@ -126,7 +126,7 @@ func main() {
 	iceServersCommas := flag.String("ice", "", "comma-separated list of ICE servers")
 	brokerURL := flag.String("url", "", "URL of signaling broker")
 	frontDomain := flag.String("front", "", "front domain")
-	codec := flag.String("codec", "post", "codec to connect to the broker (\"post\")")
+	codec := flag.String("codec", "post", "codec to connect to the broker (\"amp\", \"post\")")
 	logFilename := flag.String("log", "", "name of log file")
 	logToStateDir := flag.Bool("logToStateDir", false, "resolve the log file relative to tor's pt state dir")
 	max := flag.Int("max", DefaultSnowflakeCapacity,
@@ -166,7 +166,7 @@ func main() {
 	if "" != *brokerURL {
 		// Use potentially domain-fronting broker to rendezvous.
 		switch *codec {
-		case "post":
+		case "amp", "post":
 			broker := NewBrokerChannel(*brokerURL, *frontDomain, *codec, CreateBrokerTransport())
 			snowflakes.Tongue = NewWebRTCDialer(broker, iceServers)
 		default:

@@ -20,7 +20,7 @@ When omitted, the client uses copy-paste signalling instead.
 `-front` is an optional front domain for the Broker request.
 
 `-codec` is an optional codec for connecting to the Broker.
-It can be "post" for HTTP POST (default).
+It can be "post" for HTTP POST (default) or "amp" for AMP pages.
 
 `-ice` is a comma-separated list of ICE servers. These can be STUN or TURN
 servers.

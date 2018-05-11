@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nogoegst/amper"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -235,6 +236,13 @@ func clientOffersPOST(ctx *BrokerContext, w http.ResponseWriter, r *http.Request
 	io.Copy(w, &buf)
 }
 
+func clientOffersAMP(ctx *BrokerContext, w http.ResponseWriter, r *http.Request) {
+	s := amper.Server{
+		Handler: amper.HandlerFunc(ctx.handleClientOffers),
+	}
+	s.ServeHTTP(w, r)
+}
+
 /*
 Expects snowflake proxes which have previously successfully received
 an offer from proxyHandler to respond with an answer in an HTTP POST,
@@ -294,6 +302,7 @@ func main() {
 
 	http.Handle("/proxy", SnowflakeHandler{ctx, proxyPolls})
 	http.Handle("/client", SnowflakeHandler{ctx, clientOffersPOST})
+	http.Handle("/client/amp/", SnowflakeHandler{ctx, clientOffersAMP})
 	http.Handle("/answer", SnowflakeHandler{ctx, proxyAnswers})
 	http.Handle("/debug", SnowflakeHandler{ctx, debugHandler})
 

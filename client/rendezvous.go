@@ -22,9 +22,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"syscall"
 
 	"github.com/keroserene/go-webrtc"
+	"github.com/nogoegst/amper"
 )
 
 const (
@@ -41,6 +43,8 @@ type BrokerChannel struct {
 	url       *url.URL
 	transport http.RoundTripper // Used to make all requests.
 	codec     string
+
+	ampClient *amper.Client
 }
 
 // We make a copy of DefaultTransport because we want the default Dial
@@ -62,6 +66,12 @@ func NewBrokerChannel(broker, front, codec string, transport http.RoundTripper) 
 	}
 	log.Println("Rendezvous using Broker at:", broker)
 	bc := new(BrokerChannel)
+	bc.ampClient = &amper.Client{
+		Path:      path.Join(targetURL.Path, "/client/amp"),
+		Front:     front,
+		Host:      targetURL.Host,
+		Transport: bc.transport,
+	}
 	bc.url = targetURL
 	if "" != front { // Optional front domain.
 		log.Println("Domain fronting using:", front)
@@ -97,6 +107,8 @@ func (bc *BrokerChannel) RoundTrip(r io.Reader) (io.ReadCloser, error) {
 	switch bc.codec {
 	case "post":
 		return bc.RoundTripPOST(r)
+	case "amp":
+		return bc.RoundTripAMP(r)
 	}
 	return nil, errors.New("unsupported codec")
 }
@@ -126,6 +138,11 @@ func (bc *BrokerChannel) RoundTripPOST(r io.Reader) (io.ReadCloser, error) {
 	default:
 		return nil, errors.New(BrokerErrorUnexpected)
 	}
+}
+
+// Roundtrip using AMP codec
+func (bc *BrokerChannel) RoundTripAMP(r io.Reader) (io.ReadCloser, error) {
+	return bc.ampClient.RoundTrip(r)
 }
 
 // Roundtrip using WebRTC SessionDescriptions.
